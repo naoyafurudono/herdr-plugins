@@ -24,3 +24,15 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build -o torus-nav .
+  spotlight:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: spotlight
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m py_compile spotlight.py test_spotlight.py
+      - run: python -m unittest -v

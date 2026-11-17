@@ -5,6 +5,7 @@ Plugins for [herdr](https://herdr.dev), the terminal multiplexer for coding agen
 | Plugin | What it does |
 |---|---|
 | [torus-nav](torus-nav) | Pane focus keys that wrap around at the tab edges, so the pane layout becomes a torus |
+| [spotlight](spotlight) | Dims the panes of unfocused columns and gives each column its own tint (macOS) |
 
 Each plugin lives in its own directory and installs on its own:
 
