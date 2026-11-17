@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
 jobs:
   torus-nav:
     strategy:
@@ -17,6 +19,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: torus-nav/go.mod
+          cache: false
+      - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
       - run: go build -o torus-nav .

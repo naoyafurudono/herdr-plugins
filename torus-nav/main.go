@@ -20,21 +20,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
 )
 
-func socketPath() string {
-	if p := os.Getenv("HERDR_SOCKET_PATH"); p != "" {
-		return p
+// ioTimeout bounds each socket read and write, so a stuck herdr server cannot leave the process behind.
+var ioTimeout = syscall.Timeval{Sec: 2}
+
+// caller sends one request to herdr and decodes its result into out (out may be nil).
+type caller func(method string, params map[string]string, out any) error
+
+// socketCaller returns a caller for the herdr socket at path.
+func socketCaller(path string) caller {
+	return func(method string, params map[string]string, out any) error {
+		return call(path, method, params, out)
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config/herdr/herdr.sock")
 }
 
-// call sends one request to the herdr socket and decodes its result into out.
+// call sends one request to the herdr socket at path and decodes its result into out.
 // herdr serves one request per connection.
-func call(method string, params map[string]string, out any) error {
+//
+// It uses raw syscalls instead of net.Dial so that connect and the first write are two back-to-back
+// syscalls with the request already encoded: anything slower risks hitting herdr's 100ms sleep for
+// connections whose request has not arrived yet (see the package comment).
+func call(path, method string, params map[string]string, out any) error {
 	req, err := json.Marshal(map[string]any{"id": "torus-nav", "method": method, "params": params})
 	if err != nil {
 		return err
@@ -45,10 +53,13 @@ func call(method string, params map[string]string, out any) error {
 		return err
 	}
 	defer syscall.Close(fd)
-	if err := syscall.Connect(fd, &syscall.SockaddrUnix{Name: socketPath()}); err != nil {
+	if err := syscall.Connect(fd, &syscall.SockaddrUnix{Name: path}); err != nil {
 		return err
 	}
-	if _, err := syscall.Write(fd, req); err != nil {
+	if err := writeAll(fd, req); err != nil {
+		return err
+	}
+	if err := syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &ioTimeout); err != nil {
 		return err
 	}
 	line, err := readLine(fd)
@@ -69,6 +80,21 @@ func call(method string, params map[string]string, out any) error {
 		return nil
 	}
 	return json.Unmarshal(resp.Result, out)
+}
+
+// writeAll writes all of b to fd.
+func writeAll(fd int, b []byte) error {
+	for len(b) > 0 {
+		n, err := syscall.Write(fd, b)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+	return nil
 }
 
 // readLine reads from fd up to the first newline.
@@ -94,7 +120,8 @@ func readLine(fd int) ([]byte, error) {
 }
 
 // activePane returns the focused pane ID passed by herdr: HERDR_PANE_ID for plugin actions,
-// HERDR_ACTIVE_PANE_ID for type = "shell" keys.
+// HERDR_ACTIVE_PANE_ID for type = "shell" keys. Shell keys are slower but still work, which helps
+// when trying the binary before setting up the plugin.
 func activePane() string {
 	if p := os.Getenv("HERDR_PANE_ID"); p != "" {
 		return p
@@ -102,8 +129,8 @@ func activePane() string {
 	return os.Getenv("HERDR_ACTIVE_PANE_ID")
 }
 
-func run(d Direction) error {
-	pane := activePane()
+// run moves focus from pane (the focused pane when empty) in direction d.
+func run(call caller, pane string, d Direction) error {
 	params := map[string]string{}
 	if pane != "" {
 		params["pane_id"] = pane
@@ -137,7 +164,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: torus-nav left|right|up|down")
 		os.Exit(2)
 	}
-	if err := run(Direction(os.Args[1])); err != nil {
+	path := os.Getenv("HERDR_SOCKET_PATH")
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "torus-nav: HERDR_SOCKET_PATH is not set; run it from herdr")
+		os.Exit(1)
+	}
+	if err := run(socketCaller(path), activePane(), Direction(os.Args[1])); err != nil {
 		fmt.Fprintln(os.Stderr, "torus-nav:", err)
 		os.Exit(1)
 	}
