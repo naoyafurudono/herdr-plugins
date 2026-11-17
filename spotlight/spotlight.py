@@ -50,14 +50,16 @@ import time
 #   Memo   = {pane_id: Hue}  the column hues saved to a file. herdr pane IDs survive restarts and are never reused
 #   Tokens = {pane_id: {token name: str}}  pane metadata held by herdr. Holds HUE_TOKEN and the like
 
-# Backgrounds of unfocused columns. Darker than the plain background (light: #f9f9f9, dark: tokyo-night #1a1b26),
-# with a slight tint (tmux's window-style used to be colour254 = #e4e4e4). The same index has the same hue in both themes
+# Backgrounds of unfocused columns. Darker than the author's plain backgrounds (light: #f9f9f9, dark: tokyo-night #1a1b26),
+# with a slight tint (the author's tmux window-style was colour254 = #e4e4e4). The same index has the same hue in both themes
 PALETTE = {
     "light": ["#dde4f0", "#dde9df", "#eee5d8", "#e6dff0", "#efdfe5", "#d9e8e7"],
     "dark": ["#11172a", "#0f1a14", "#1d1610", "#181227", "#1e1118", "#0d1a1c"],
 }
 DEFAULT = "default"  # the plain background (the focused column)
 SOURCE = "spotlight"
+PLUGIN_ID = "naoyafurudono.spotlight"
+HERE = os.path.dirname(os.path.abspath(__file__))  # this installation's plugin directory
 HUE_TOKEN = "spotlight_hue"  # the Hue assigned to the pane's column
 BG_TOKEN = "spotlight_bg"  # the Color last written to the tty
 TTY_TOKEN = "spotlight_tty"  # the path of the pane's tty. It does not change while the pane lives, so remember it
@@ -672,7 +674,7 @@ def paint_new_pane(tty, theme, layout=None):
 
 
 def paint_tabs(theme=None, force=False, unrecorded=()):
-    """Paint the panes of all tabs. If theme is omitted, it is decided from the macOS appearance. Return False if some panes could not be painted.
+    """Paint the panes of all tabs. If theme is omitted, it is decided from the terminal background (see current_theme). Return False if some panes could not be painted.
 
     unrecorded are panes whose background early_paint wrote without recording it. Their recorded color cannot be trusted, so they are always rewritten.
     """
@@ -937,9 +939,53 @@ def watch(sock):
         checked = time.monotonic()
         if scan:
             scan()  # keep the record of checked pids fresh, so fewer need checking on a fork
-        if os.stat(__file__).st_mtime != VERSION:
-            # Restart with the same arguments. The lock fd is inherited across exec, so it stays the watcher, with the new contents
+        check_installation()
+        try:
+            changed = os.stat(__file__).st_mtime != VERSION
+        except FileNotFoundError:  # an old installation was cleaned up; check_installation moves on next time
+            changed = False
+        if changed:
+            # A linked plugin was edited in place. Restart with the same arguments. The lock fd is inherited across exec, so it stays the watcher, with the new contents
             os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+
+
+def installation(plugins, here):
+    """plugin.list's plugins, this file's plugin directory -> ("off", None) | ("moved", root) | ("current", None).
+
+    "off": the plugin was disabled or uninstalled. "moved": `herdr plugin update` or a reinstall put it in root,
+    so this process runs an old installation. herdr does not stop or restart detached processes, so the watcher checks.
+    """
+    mine = next((p for p in plugins if p.get("plugin_id") == PLUGIN_ID), None)
+    if not mine or not mine.get("enabled"):
+        return "off", None
+    root = mine.get("plugin_root", "")
+    if os.path.realpath(root) != os.path.realpath(here):
+        return "moved", root
+    return "current", None
+
+
+def restore_all():
+    """Put the plain background back on every pane this process dimmed. Used when the plugin is turned off."""
+    for tty, (color, _, ino) in list(CACHE.get("written", {}).items()):
+        if color != DEFAULT:
+            try:
+                write_bg(tty, DEFAULT, ino)
+            except OSError:
+                pass
+
+
+def check_installation():
+    """Exit after restoring backgrounds if the plugin was turned off; move to the new installation if it was updated."""
+    try:
+        state, root = installation(herdr("plugin.list")["plugins"], HERE)
+    except (OSError, RuntimeError, KeyError, ValueError):
+        return  # keep going; the next check retries
+    if state == "off":
+        restore_all()
+        sys.exit(0)
+    if state == "moved":
+        # The lock fd is inherited across exec, so it stays the watcher, with the new installation's code
+        os.execv(sys.executable, [sys.executable, os.path.join(root, os.path.basename(__file__)), *sys.argv[1:]])
 
 
 def watch_lock():

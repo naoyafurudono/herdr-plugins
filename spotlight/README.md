@@ -10,7 +10,8 @@ server restarts. There are six hues; with more than six columns, hues repeat but
 
 ## Install
 
-Requires herdr 0.9.5 or later, macOS, and `python3` on `PATH` (standard library only, no build step).
+Requires herdr 0.9.5 or later, macOS, and Python 3.9 or later as `python3` on `PATH` (standard library only, no build
+step; the macOS system Python works).
 
 ```sh
 herdr plugin install naoyafurudono/herdr-plugins/spotlight
@@ -29,6 +30,9 @@ To turn it off:
 herdr plugin disable naoyafurudono.spotlight
 ```
 
+Run it from a herdr pane, so the running server sees the change. Within about a second the watcher restores the
+plain background of the dimmed panes and exits.
+
 ## How it works
 
 herdr has no per-pane color setting, so spotlight writes the background color escape sequence (OSC 11, or OSC 111
@@ -42,11 +46,14 @@ The event hooks alone react too late (herdr delivers events in 100ms steps, and 
 so the first hook starts one background watcher process per herdr server. The watcher:
 
 - subscribes to herdr events, including `layout.updated`;
-- polls the visible tab's layout every 10ms for a short time after keyboard or mouse input, or while panes are
-  producing output, and does not poll otherwise;
+- polls the visible tab's layout every 10ms for 2 seconds after keyboard or mouse input, and about every 30ms while
+  panes are producing output; it does not poll otherwise;
 - watches the herdr server for forks, so a new pane is painted before herdr draws its first frame;
 - rewrites a dimmed pane's background after its output pauses, in case the program inside reset it;
 - follows changes of the light/dark appearance;
+- checks every 0.5 seconds whether the plugin is still enabled: after `herdr plugin disable` or `uninstall` it restores
+  the plain background of the panes it dimmed and exits, and after `herdr plugin update` it re-executes itself from the
+  new installation (herdr itself does not stop or restart detached processes);
 - keeps reconnecting for 60 seconds after the herdr server stops, then exits.
 
 State lives in `$XDG_STATE_HOME/herdr-spotlight/` (default `~/.local/state/herdr-spotlight/`), one set of files per

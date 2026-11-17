@@ -17,6 +17,7 @@ from spotlight import (
     fork_watcher,
     ghostty_background,
     heal,
+    installation,
     plan,
     predict_color,
     repaints,
@@ -36,6 +37,24 @@ def split(direction, ratio, x, y, width, height):
 
 
 AREA = {"x": 0, "y": 0, "width": 200, "height": 100}
+
+
+class InstallationTest(unittest.TestCase):
+    def plugin(self, root="/plugins/spotlight", enabled=True):
+        return {"plugin_id": "naoyafurudono.spotlight", "plugin_root": root, "enabled": enabled}
+
+    def test_current(self):
+        self.assertEqual(installation([self.plugin()], "/plugins/spotlight"), ("current", None))
+
+    def test_disabled(self):
+        self.assertEqual(installation([self.plugin(enabled=False)], "/plugins/spotlight"), ("off", None))
+
+    def test_uninstalled(self):
+        other = {"plugin_id": "example.other", "plugin_root": "/plugins/other", "enabled": True}
+        self.assertEqual(installation([other], "/plugins/spotlight"), ("off", None))
+
+    def test_updated_to_another_directory(self):
+        self.assertEqual(installation([self.plugin(root="/plugins/spotlight-2")], "/plugins/spotlight"), ("moved", "/plugins/spotlight-2"))
 
 
 class ColumnsTest(unittest.TestCase):
