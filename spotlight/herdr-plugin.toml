@@ -1,0 +1,46 @@
+id = "naoyafurudono.spotlight"
+name = "Spotlight"
+version = "0.1.0"
+min_herdr_version = "0.9.5"
+description = "Dim the panes of unfocused columns (= jobs) and give each column its own tint"
+platforms = ["macos"]
+
+# Paint every pane after the server starts and the session is restored
+[[startup]]
+command = ["python3", "spotlight.py", "--force"]
+
+# Regular repainting is done by the watcher that spotlight.py starts in the background (it subscribes to events and polls the layout of the visible tab).
+# The hooks below start the watcher, and paint when there is no watcher. When a watcher exists they exit right away.
+# When a pane closes because its shell exits, pane.exited arrives instead of pane.closed.
+# layout.updated (such as swapping panes within a tab) is never delivered to hooks, so only the watcher picks it up
+[[events]]
+on = "pane.created"
+command = ["python3", "spotlight.py"]
+
+[[events]]
+on = "pane.moved"
+command = ["python3", "spotlight.py"]
+
+[[events]]
+on = "pane.closed"
+command = ["python3", "spotlight.py"]
+
+[[events]]
+on = "pane.exited"
+command = ["python3", "spotlight.py"]
+
+# When focus moves, dim the column it left and restore the plain background of the column it moved to
+[[events]]
+on = "pane.focused"
+command = ["python3", "spotlight.py"]
+
+[[events]]
+on = "tab.focused"
+command = ["python3", "spotlight.py"]
+
+# Repaint every pane by hand: herdr plugin action invoke naoyafurudono.spotlight.repaint
+[[actions]]
+id = "repaint"
+title = "Repaint pane colors"
+contexts = ["workspace"]
+command = ["python3", "spotlight.py", "--force"]
